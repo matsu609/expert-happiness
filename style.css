@@ -34,15 +34,21 @@ h1 {
     font-variant-numeric: tabular-nums; /* 数字の幅を固定 */
 }
 
-#minutes, #seconds, #milliseconds {
+#minutes, #seconds {
     color: #ffffff;
     font-family: 'monospace', 'Arial', sans-serif; /* 固定幅フォントを適用 */
+    width: 1.2em; /* 2桁分の幅を固定 */
+    display: inline-block; /* widthを適用するために必要 */
+    text-align: center; /* 数字を中央寄せ */
 }
 
 #milliseconds {
     font-size: 0.5em; /* 半分のサイズ */
     color: #aaaaaa;
     margin-left: 5px;
+    width: 1.8em; /* 3桁分の幅を固定 */
+    display: inline-block; /* widthを適用するために必要 */
+    text-align: center; /* 数字を中央寄せ */
 }
 
 .button-container button {
@@ -82,25 +88,29 @@ h1 {
 
 .bell-setting {
     display: flex;
+    justify-content: center; /* 中央寄せ */
     align-items: center;
     margin-bottom: 10px;
 }
 
 .bell-setting label {
-    flex: 1;
+    width: 40px; /* ベルマークの幅を調整 */
     font-size: 1.1em;
     color: #ffffff;
+    text-align: right; /* 右寄せにして入力欄に近づける */
+    margin-right: 5px; /* 入力欄との間に少しスペースを設ける */
 }
 
 .bell-setting input {
-    flex: 2;
+    flex: none; /* flex-growを無効にする */
+    width: 5em; /* 5桁分の幅 */
     padding: 8px;
     border-radius: 5px;
     border: 1px solid #61dafb;
     background-color: #282c34;
     color: #ffffff;
     font-size: 1em;
-    margin-left: 10px;
+    margin-left: 0; /* margin-leftを削除または0にする */
 }
 
 #save-settings-btn {

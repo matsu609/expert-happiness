@@ -19,6 +19,8 @@ let startTime = 0; // タイマー開始時のタイムスタンプ
 let remainingTimeAtPause = 0; // 一時停止時の残り時間
 let finalBellsRung = false; // 最終ベルが鳴ったかどうか
 
+let audioContext; // AudioContextをグローバルスコープに移動
+
 const alarmSound = createBeepSound();
 
 // 通知許可を要求する関数
@@ -56,7 +58,7 @@ function showNotification(title, body, sound = true) {
 }
 
 function createBeepSound() {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    audioContext = new (window.AudioContext || window.webkitAudioContext)(); // グローバル変数に代入
     if (!audioContext) {
         console.error("AudioContext is not supported in this browser.");
         return null;
@@ -104,6 +106,20 @@ function updateDisplay() {
 
 function startTimer() {
     if (isRunning || totalSeconds <= 0) return;
+
+    // AudioContextが中断状態の場合、再開を試みる
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+            console.log('AudioContext resumed successfully.');
+            console.log('AudioContext state after resume (startTimer):', audioContext.state);
+            // 再開後に音を鳴らす（オプション）
+            // alarmSound.play();
+        }).catch(e => {
+            console.error('Failed to resume AudioContext:', e);
+        });
+    } else {
+        console.log('AudioContext state (startTimer):', audioContext ? audioContext.state : 'not initialized');
+    }
 
     messageContainer.textContent = '';
     isRunning = true;
@@ -154,14 +170,26 @@ function playBellMultipleTimes(count, message) {
     showNotification("プレゼンタイマー", message, false); // 通知は音なしで表示
 
     if (!alarmSound) return;
+
     let currentCount = 0;
-    const interval = setInterval(() => {
-        alarmSound.play(); // 音だけを鳴らす
-        currentCount++;
-        if (currentCount === count) {
-            clearInterval(interval);
+    const playSingleBell = () => {
+        if (audioContext && audioContext.state === 'suspended') {
+            audioContext.resume().then(() => {
+                console.log('AudioContext resumed for single bell play.');
+                alarmSound.play();
+            }).catch(e => {
+                console.error('Failed to resume AudioContext for single bell play:', e);
+            });
+        } else {
+            alarmSound.play(); // 音だけを鳴らす
         }
-    }, 300); // 0.3秒間隔に変更
+        currentCount++;
+        if (currentCount < count) {
+            setTimeout(playSingleBell, 300); // 0.3秒間隔で再帰的に呼び出し
+        }
+    };
+
+    playSingleBell(); // 最初のベルを鳴らす
 }
 
 function playFinalBells() {
@@ -170,14 +198,21 @@ function playFinalBells() {
 
 function checkBellTimes() {
     const currentElapsedTime = initialTotalSeconds - totalSeconds; // 経過時間を計算（秒単位、浮動小数点数）
+    console.log('checkBellTimes - currentElapsedTime:', currentElapsedTime);
+    console.log('checkBellTimes - bellTimes:', bellTimes);
+    console.log('checkBellTimes - rungBellTimes:', rungBellTimes);
 
     bellTimes.forEach(bellSetting => {
         const bellTriggerTime = bellSetting.time * 60; // ベルが鳴るべき経過時間（秒単位）
-        const tolerance = 0.05; // 50ミリ秒の許容誤差
+        const tolerance = 0.1; // 許容誤差を100ミリ秒に広げる
+
+        console.log(`  Bell Setting: ${bellSetting.time} min (${bellTriggerTime} sec), Count: ${bellSetting.count}`);
+        console.log(`  Condition: currentElapsedTime (${currentElapsedTime}) >= bellTriggerTime - tolerance (${bellTriggerTime - tolerance}) && currentElapsedTime (${currentElapsedTime}) <= bellTriggerTime + tolerance (${bellTriggerTime + tolerance}) && !rungBellTimes.includes(${bellTriggerTime})`);
 
         // ベルが鳴るべき時刻に到達し、かつまだ鳴らされていない場合
         if (currentElapsedTime >= bellTriggerTime - tolerance && currentElapsedTime <= bellTriggerTime + tolerance && !rungBellTimes.includes(bellTriggerTime)) {
             const message = `${bellSetting.time}分経過しました。`;
+            console.log(`  !!! Playing bell for ${bellSetting.time} min, count: ${bellSetting.count}`);
             playBellMultipleTimes(bellSetting.count, message);
             rungBellTimes.push(bellTriggerTime); // 鳴らした経過時間を記録
         }
@@ -208,6 +243,7 @@ function saveBellSettings() {
 
     // bellTimesを時間でソート（オプション）
     bellTimes.sort((a, b) => a.time - b.time);
+    console.log('saveBellSettings - bellTimes:', bellTimes); // ログを追加
 
     // bell3の時間をtotalSecondsに設定し、表示を更新
     if (bell3Time > 0) {
@@ -257,6 +293,15 @@ document.addEventListener('visibilitychange', () => {
     } else {
         // タブが再び表示されたら、経過時間を補償してタイマーを再開
         if (isRunning) {
+            // AudioContextが中断状態の場合、再開を試みる
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    console.log('AudioContext resumed successfully on visibilitychange.');
+                }).catch(e => {
+                    console.error('Failed to resume AudioContext on visibilitychange:', e);
+                });
+            }
+
             const now = Date.now();
             const hiddenDuration = (now - startTime) / 1000; // 非表示になっていた時間（秒）
             const oldTotalSeconds = remainingTimeAtPause; // 非表示になる前の残り時間
@@ -272,7 +317,8 @@ document.addEventListener('visibilitychange', () => {
 
                 // 非表示になっていた間にベルが鳴るべき時刻が過ぎていた場合
                 if (oldElapsedTime < bellTriggerTime && newElapsedTime >= bellTriggerTime && !rungBellTimes.includes(bellTriggerTime)) {
-                    playBellMultipleTimes(bellSetting.count);
+                    const message = `${bellSetting.time}分経過しました。`; // メッセージを生成
+                    playBellMultipleTimes(bellSetting.count, message); // message引数を渡す
                     rungBellTimes.push(bellTriggerTime); // 鳴らした経過時間を記録
                 }
             });
@@ -282,7 +328,7 @@ document.addEventListener('visibilitychange', () => {
                 totalSeconds = 0;
                 updateDisplay();
                 if (!finalBellsRung) {
-                    playFinalBells();
+                    playFinalBells(); // playFinalBellsは既にmessage引数を持つplayBellMultipleTimesを呼び出している
                     messageContainer.textContent = '時間です！';
                     finalBellsRung = true;
                 }
