@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>プレゼンタイマー</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="timer-container">
+        <h1>プレゼンタイマー</h1>
+        <div class="time-display">
+            <span id="minutes">00</span>:<span id="seconds">00</span><span id="milliseconds" class="milliseconds">000</span>
+        </div>
+        <div id="settings-panel">
+            <h2>通知設定</h2>
+            <p>指定した時間が過ぎるとベルが鳴ります</p>
+            <div class="bell-setting">
+                <label for="bell1">🔔</label>
+                <input type="number" id="bell1" class="bell-input" min="0" value="8"> 分
+            </div>
+            <div class="bell-setting">
+                <label for="bell2">🔔🔔</label>
+                <input type="number" id="bell2" class="bell-input" min="0" value="10"> 分
+            </div>
+            <div class="bell-setting">
+                <label for="bell3">🔔🔔🔔</label>
+                <input type="number" id="bell3" class="bell-input" min="0" value="15"> 分
+            </div>
+            <button id="save-settings-btn" style="display: none;">保存</button>
+        </div>
+        <div class="button-container">
+            <button id="toggle-timer-btn">スタート</button>
+            <button id="reset-btn">リセット</button>
+            <button id="test-sound-btn">音を確認</button>
+        </div>
+        <div id="message-container" class="message"></div>
+    </div>
+
+
+    <script src="script.js"></script>
+</body>
+</html>
