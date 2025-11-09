@@ -5,23 +5,41 @@ const toggleTimerBtn = document.getElementById('toggle-timer-btn'); // 新しい
 const resetBtn = document.getElementById('reset-btn');
 const testSoundBtn = document.getElementById('test-sound-btn');
 const messageContainer = document.getElementById('message-container');
+const timeDisplay = document.querySelector('.time-display'); // 時間表示要素を取得
 const settingsPanel = document.getElementById('settings-panel');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
-const bellInputs = document.querySelectorAll('.bell-input');
+const colonElement = document.createElement('span'); // コロン要素を新しく作成
+colonElement.classList.add('colon');
+colonElement.textContent = ':';
+minutesElement.after(colonElement); // minutesElementの後にコロンを追加
+
+// ベル1の入力フィールドの要素を取得
+const bell1HoursInput = document.getElementById('bell1-hours');
+const bell1MinutesInput = document.getElementById('bell1-minutes');
+const bell1SecondsInput = document.getElementById('bell1-seconds');
+
+// ベル2の入力フィールドの要素を取得
+const bell2HoursInput = document.getElementById('bell2-hours');
+const bell2MinutesInput = document.getElementById('bell2-minutes');
+const bell2SecondsInput = document.getElementById('bell2-seconds');
+
+// ベル3の入力フィールドの要素を取得
+const bell3HoursInput = document.getElementById('bell3-hours');
+const bell3MinutesInput = document.getElementById('bell3-minutes');
+const bell3SecondsInput = document.getElementById('bell3-seconds');
+
+const soundSelect = document.getElementById('sound-select'); // 音源選択要素を追加
+const bellSoundElement = document.getElementById('bell-sound'); // MP3オーディオ要素を取得
 
 let timer;
 let totalSeconds = 0; // 秒単位で管理（浮動小数点数）
 let initialTotalSeconds = 0; // タイマー開始時の総秒数を記録
 let isRunning = false;
-let bellTimes = []; // [{ time: minutes, count: bells }]
-let rungBellTimes = []; // 既にベルが鳴った経過時間を記録
+let bellTimes = []; // [{ time: seconds, count: bells, rung: false }]
+let rungBellCounts = 0; // 鳴らしたベルの回数を記録 (1回目、2回目、3回目)
 let startTime = 0; // タイマー開始時のタイムスタンプ
 let remainingTimeAtPause = 0; // 一時停止時の残り時間
-let finalBellsRung = false; // 最終ベルが鳴ったかどうか
-
-let audioContext; // AudioContextをグローバルスコープに移動
-
-const alarmSound = createBeepSound();
+let isOvertime = false; // カウントアップ中かどうか
 
 // 通知許可を要求する関数
 function requestNotificationPermission() {
@@ -49,97 +67,80 @@ function showNotification(title, body, sound = true) {
         };
         const notification = new Notification(title, options);
 
-        if (sound && alarmSound) {
-            alarmSound.play(); // 通知と同時に音を鳴らす
+        if (sound && bellSoundElement) {
+            bellSoundElement.play().catch(e => {
+                console.error('Failed to play bell sound with notification:', e);
+            });
         }
     } else if (Notification.permission === "denied") {
         console.warn("通知が拒否されているため、通知を表示できません。");
     }
 }
 
-function createBeepSound() {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)(); // グローバル変数に代入
-    if (!audioContext) {
-        console.error("AudioContext is not supported in this browser.");
-        return null;
-    }
-
-    function bellSound() {
-        const now = audioContext.currentTime;
-        const gainNode = audioContext.createGain();
-        gainNode.connect(audioContext.destination);
-        
-        // Main tone
-        const osc1 = audioContext.createOscillator();
-        osc1.type = 'sine';
-        osc1.frequency.setValueAtTime(1046.50, now); // C6
-        osc1.connect(gainNode);
-
-        // Overtone
-        const osc2 = audioContext.createOscillator();
-        osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(2093.00, now); // C7
-        osc2.connect(gainNode);
-
-        gainNode.gain.setValueAtTime(1, now);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
-
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 1.5);
-        osc2.stop(now + 1.5);
-    }
-
-    return { play: bellSound };
-}
-
 function updateDisplay() {
-    const totalMilliseconds = Math.max(0, totalSeconds * 1000); // マイナスにならないようにMath.max
-    const minutes = Math.floor(totalMilliseconds / (60 * 1000));
-    const seconds = Math.floor((totalMilliseconds % (60 * 1000)) / 1000);
-    const milliseconds = Math.floor(totalMilliseconds % 1000);
+    let displayTotalSeconds = totalSeconds;
+    let sign = '';
 
-    minutesElement.textContent = String(minutes).padStart(2, '0');
+    if (isOvertime) {
+        displayTotalSeconds = Math.abs(totalSeconds); // カウントアップ中は絶対値を使用
+        sign = '+';
+    } else {
+        displayTotalSeconds = Math.max(0, totalSeconds); // マイナスにならないようにMath.max
+    }
+
+    const totalMilliseconds = displayTotalSeconds * 1000;
+    const hours = Math.floor(totalMilliseconds / (60 * 60 * 1000));
+    const minutes = Math.floor((totalMilliseconds % (60 * 60 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((totalMilliseconds % (60 * 1000)) / 1000);
+    const milliseconds = Math.floor(totalMilliseconds % 1000 / 10); // 2桁にするために10で割る
+
+    minutesElement.textContent = sign + String(minutes).padStart(2, '0');
     secondsElement.textContent = String(seconds).padStart(2, '0');
-    millisecondsElement.textContent = String(milliseconds).padStart(3, '0');
+    millisecondsElement.textContent = String(milliseconds).padStart(2, '0'); // 2桁表示
+
+    // 時間表示のスタイルを更新
+    if (isOvertime) {
+        timeDisplay.classList.add('overtime-red');
+        timeDisplay.classList.remove('warning-yellow', 'warning-purple');
+    } else if (rungBellCounts === 1) {
+        timeDisplay.classList.add('warning-yellow');
+        timeDisplay.classList.remove('warning-purple', 'overtime-red');
+    } else if (rungBellCounts === 2) {
+        timeDisplay.classList.add('warning-purple');
+        timeDisplay.classList.remove('warning-yellow', 'overtime-red');
+    } else {
+        timeDisplay.classList.remove('warning-yellow', 'warning-purple', 'overtime-red');
+    }
 }
 
 function startTimer() {
-    if (isRunning || totalSeconds <= 0) return;
-
-    // AudioContextが中断状態の場合、再開を試みる
-    if (audioContext && audioContext.state === 'suspended') {
-        audioContext.resume().then(() => {
-            console.log('AudioContext resumed successfully.');
-            console.log('AudioContext state after resume (startTimer):', audioContext.state);
-            // 再開後に音を鳴らす（オプション）
-            // alarmSound.play();
-        }).catch(e => {
-            console.error('Failed to resume AudioContext:', e);
-        });
-    } else {
-        console.log('AudioContext state (startTimer):', audioContext ? audioContext.state : 'not initialized');
-    }
+    if (isRunning) return;
 
     messageContainer.textContent = '';
     isRunning = true;
     initialTotalSeconds = totalSeconds; // タイマー開始時の総秒数を記録
     startTime = Date.now(); // タイマー開始時のタイムスタンプを記録 (ミリ秒)
+    isOvertime = false; // タイマー開始時はカウントアップではない
+
     timer = setInterval(() => {
         const now = Date.now();
         const elapsedSinceStart = (now - startTime) / 1000; // 開始からの経過時間（秒）
-        totalSeconds = initialTotalSeconds - elapsedSinceStart;
 
-        if (totalSeconds <= 0) {
-            totalSeconds = 0;
-            updateDisplay();
-            if (!finalBellsRung) {
-                playFinalBells();
-                messageContainer.textContent = '時間です！';
-                finalBellsRung = true;
+        if (!isOvertime) {
+            totalSeconds = initialTotalSeconds - elapsedSinceStart;
+            if (totalSeconds <= 0) {
+                totalSeconds = 0; // 0秒で一旦停止
+                if (rungBellCounts < 3) { // 3回目のベルが鳴るまで
+                    playBellMultipleTimes(3, '時間です！');
+                    rungBellCounts = 3; // 3回目のベルが鳴ったことを記録
+                }
+                isOvertime = true; // カウントアップに切り替え
+                initialTotalSeconds = 0; // カウントアップの基準を0に設定
+                startTime = Date.now(); // カウントアップ開始時刻をリセット
             }
-            stopTimer();
-            return;
+        } else {
+            // カウントアップ
+            totalSeconds = -(elapsedSinceStart); // 経過時間を負の値として記録
         }
 
         updateDisplay();
@@ -153,108 +154,167 @@ function stopTimer() {
     remainingTimeAtPause = totalSeconds; // 一時停止時の残り時間を記録
 }
 
-
 function resetTimer() {
     stopTimer();
-    const bell3Input = document.getElementById('bell3');
-    const bell3Time = parseInt(bell3Input.value);
-    totalSeconds = (!isNaN(bell3Time) && bell3Time > 0) ? bell3Time * 60 : 0; // 秒単位
+    saveBellSettings(); // 最新の設定を読み込む
     messageContainer.textContent = '';
+    rungBellCounts = 0; // 鳴らしたベルの回数をリセット
+    isOvertime = false; // カウントアップ状態をリセット
+    timeDisplay.classList.remove('warning-yellow', 'warning-purple', 'overtime-red'); // 色をリセット
+    bellTimes.forEach(bell => bell.rung = false); // ベルの鳴動状態をリセット
     updateDisplay();
-    rungBellTimes = []; // リセット時に鳴らしたベルの記録をクリア
-    finalBellsRung = false; // 最終ベルのフラグをリセット
 }
 
 function playBellMultipleTimes(count, message) {
-    // 通知は一度だけ表示し、音は複数回鳴らす
     showNotification("プレゼンタイマー", message, false); // 通知は音なしで表示
 
-    if (!alarmSound) return;
+    if (!bellSoundElement) return;
 
     let currentCount = 0;
     const playSingleBell = () => {
-        if (audioContext && audioContext.state === 'suspended') {
-            audioContext.resume().then(() => {
-                console.log('AudioContext resumed for single bell play.');
-                alarmSound.play();
-            }).catch(e => {
-                console.error('Failed to resume AudioContext for single bell play:', e);
-            });
-        } else {
-            alarmSound.play(); // 音だけを鳴らす
-        }
+        bellSoundElement.currentTime = 0; // 再生位置を先頭に戻す
+        bellSoundElement.play().catch(e => {
+            console.error('Failed to play bell sound:', e);
+        });
         currentCount++;
         if (currentCount < count) {
-            setTimeout(playSingleBell, 300); // 0.3秒間隔で再帰的に呼び出し
+            setTimeout(playSingleBell, 400); // 0.4秒間隔でベルを鳴らす
         }
     };
 
     playSingleBell(); // 最初のベルを鳴らす
 }
 
-function playFinalBells() {
-    playBellMultipleTimes(3, '時間です！'); // 最終ベルは常に3回
-}
-
 function checkBellTimes() {
     const currentElapsedTime = initialTotalSeconds - totalSeconds; // 経過時間を計算（秒単位、浮動小数点数）
-    console.log('checkBellTimes - currentElapsedTime:', currentElapsedTime);
-    console.log('checkBellTimes - bellTimes:', bellTimes);
-    console.log('checkBellTimes - rungBellTimes:', rungBellTimes);
 
     bellTimes.forEach(bellSetting => {
-        const bellTriggerTime = bellSetting.time * 60; // ベルが鳴るべき経過時間（秒単位）
+        const bellTriggerTime = bellSetting.time; // 秒単位
         const tolerance = 0.1; // 許容誤差を100ミリ秒に広げる
 
-        console.log(`  Bell Setting: ${bellSetting.time} min (${bellTriggerTime} sec), Count: ${bellSetting.count}`);
-        console.log(`  Condition: currentElapsedTime (${currentElapsedTime}) >= bellTriggerTime - tolerance (${bellTriggerTime - tolerance}) && currentElapsedTime (${currentElapsedTime}) <= bellTriggerTime + tolerance (${bellTriggerTime + tolerance}) && !rungBellTimes.includes(${bellTriggerTime})`);
-
         // ベルが鳴るべき時刻に到達し、かつまだ鳴らされていない場合
-        if (currentElapsedTime >= bellTriggerTime - tolerance && currentElapsedTime <= bellTriggerTime + tolerance && !rungBellTimes.includes(bellTriggerTime)) {
-            const message = `${bellSetting.time}分経過しました。`;
-            console.log(`  !!! Playing bell for ${bellSetting.time} min, count: ${bellSetting.count}`);
+        if (!isOvertime && currentElapsedTime >= bellTriggerTime - tolerance && currentElapsedTime <= bellTriggerTime + tolerance && !bellSetting.rung) {
+            const message = `${Math.floor(bellSetting.time / 60)}分${bellSetting.time % 60}秒経過しました。`;
             playBellMultipleTimes(bellSetting.count, message);
-            rungBellTimes.push(bellTriggerTime); // 鳴らした経過時間を記録
+            bellSetting.rung = true; // 鳴らした経過時間を記録
+            rungBellCounts++; // 鳴らしたベルの回数をインクリメント
         }
     });
 }
 
 function saveBellSettings() {
     bellTimes = [];
-    let bell3Time = 0; // bell3の時間を一時的に保持
 
-    bellInputs.forEach(input => {
-        const time = parseInt(input.value);
-        if (!isNaN(time) && time > 0) {
-            let bellCount = 0;
-            if (input.id === 'bell1') {
-                bellCount = 1;
-            } else if (input.id === 'bell2') {
-                bellCount = 2;
-            } else if (input.id === 'bell3') {
-                bellCount = 3;
-                bell3Time = time; // bell3の時間を保存
-            }
-            if (bellCount > 0) {
-                bellTimes.push({ time: time, count: bellCount });
-            }
-        }
-    });
-
-    // bellTimesを時間でソート（オプション）
-    bellTimes.sort((a, b) => a.time - b.time);
-    console.log('saveBellSettings - bellTimes:', bellTimes); // ログを追加
-
-    // bell3の時間をtotalSecondsに設定し、表示を更新
-    if (bell3Time > 0) {
-        totalSeconds = bell3Time * 60;
-        updateDisplay();
+    // ベル1の設定
+    const bell1Hours = parseInt(bell1HoursInput.value) || 0;
+    const bell1Minutes = parseInt(bell1MinutesInput.value) || 0;
+    const bell1Seconds = parseInt(bell1SecondsInput.value) || 0;
+    const bell1Time = (bell1Hours * 3600) + (bell1Minutes * 60) + bell1Seconds;
+    if (bell1Time > 0) {
+        bellTimes.push({ time: bell1Time, count: 1, rung: false });
     }
+
+    // ベル2の設定
+    const bell2Hours = parseInt(bell2HoursInput.value) || 0;
+    const bell2Minutes = parseInt(bell2MinutesInput.value) || 0;
+    const bell2Seconds = parseInt(bell2SecondsInput.value) || 0;
+    const bell2Time = (bell2Hours * 3600) + (bell2Minutes * 60) + bell2Seconds;
+    if (bell2Time > 0) {
+        bellTimes.push({ time: bell2Time, count: 2, rung: false });
+    }
+
+    // ベル3の設定
+    const bell3Hours = parseInt(bell3HoursInput.value) || 0;
+    const bell3Minutes = parseInt(bell3MinutesInput.value) || 0;
+    const bell3Seconds = parseInt(bell3SecondsInput.value) || 0;
+    const bell3Time = (bell3Hours * 3600) + (bell3Minutes * 60) + bell3Seconds;
+    if (bell3Time > 0) {
+        bellTimes.push({ time: bell3Time, count: 3, rung: false });
+        totalSeconds = bell3Time; // 3回ベルが鳴る時間が初期設定の時間になるようにする
+    } else {
+        totalSeconds = 0; // ベル3が設定されていない場合は0
+    }
+
+    // bellTimesを時間でソート
+    bellTimes.sort((a, b) => a.time - b.time);
+    console.log('saveBellSettings - bellTimes:', bellTimes);
+
+    updateDisplay();
 }
 
-bellInputs.forEach(input => {
+// 音源選択の変更を処理する関数
+function handleSoundSelectChange() {
+    const selectedSound = soundSelect.value;
+    bellSoundElement.src = selectedSound;
+    bellSoundElement.load(); // 新しい音源をロード
+    console.log('Sound source changed to:', selectedSound);
+}
+
+// 日付に基づいて音源を自動変更する関数
+function setSoundBasedOnDate() {
+    const today = new Date();
+    const month = today.getMonth() + 1; // 1月は0なので+1
+    const day = today.getDate();
+
+    let defaultSound = 'sei_ge_bell01.mp3'; // デフォルトの音源
+
+    // 例: 12月にはクリスマスサウンド
+    if (month === 12) {
+        defaultSound = 'Christmas.mp3';
+    }
+    // 例: 特定の日付に三味線サウンド (例: 11月10日)
+    if (month === 11 && day === 10) { // 現在の日付に合わせて有効化
+        defaultSound = 'shamisen.mp3';
+    }
+    // 例: 特定の日付に小太鼓サウンド (例: 1月1日)
+    if (month === 1 && day === 1) {
+        defaultSound = 'kodaiko.mp3';
+    }
+    // 例: 特定の日付に大太鼓サウンド (例: 1月2日)
+    if (month === 1 && day === 2) {
+        defaultSound = 'oodaiko.mp3';
+    }
+    // 例: 特定の日付にライフルサウンド (例: 1月3日)
+    if (month === 1 && day === 3) {
+        defaultSound = 'rifle.mp3';
+    }
+    // 例: 特定の日付に大砲サウンド (例: 1月4日)
+    if (month === 1 && day === 4) {
+        defaultSound = 'taihou.mp3';
+    }
+    // 例: 特定の日付にハトサウンド (例: 1月5日)
+    if (month === 1 && day === 5) {
+        defaultSound = 'hato.mp3';
+    }
+    // 例: 特定の日付にニワトリサウンド (例: 1月6日)
+    if (month === 1 && day === 6) {
+        defaultSound = 'niwatori.mp3';
+    }
+    // 例: 7月にはヒグラシサウンド
+    if (month === 7) {
+        defaultSound = 'higurashi.mp3';
+    }
+    // 例: 8月にはミンミンゼミサウンド
+    if (month === 8) {
+        defaultSound = 'minminzemi.mp3';
+    }
+
+    // 選択ボックスの値を更新し、音源をロード
+    soundSelect.value = defaultSound;
+    bellSoundElement.src = defaultSound;
+    bellSoundElement.load();
+    console.log('Auto-set sound source to:', defaultSound);
+}
+
+
+// 新しい入力フィールドにイベントリスナーを追加
+[bell1HoursInput, bell1MinutesInput, bell1SecondsInput,
+ bell2HoursInput, bell2MinutesInput, bell2SecondsInput,
+ bell3HoursInput, bell3MinutesInput, bell3SecondsInput].forEach(input => {
     input.addEventListener('input', saveBellSettings);
 });
+
+soundSelect.addEventListener('change', handleSoundSelectChange); // 音源選択のイベントリスナーを追加
 
 toggleTimerBtn.addEventListener('click', () => {
     if (isRunning) {
@@ -267,20 +327,23 @@ toggleTimerBtn.addEventListener('click', () => {
 });
 
 resetBtn.addEventListener('click', () => {
-    saveBellSettings(); // リセットボタンが押されたときに設定を保存
     resetTimer();
     toggleTimerBtn.textContent = 'スタート'; // リセット時はスタートに戻す
 });
 
 testSoundBtn.addEventListener('click', () => {
-    if (alarmSound) {
-        alarmSound.play();
+    if (bellSoundElement) {
+        bellSoundElement.currentTime = 0; // 再生位置を先頭に戻す
+        bellSoundElement.play().catch(e => {
+            console.error('Failed to play test sound:', e);
+        });
     }
 });
 
 updateDisplay();
 saveBellSettings();
 requestNotificationPermission(); // ページロード時に通知許可を求める
+setSoundBasedOnDate(); // ページロード時に日付に基づいて音源を設定
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -292,48 +355,36 @@ document.addEventListener('visibilitychange', () => {
         }
     } else {
         // タブが再び表示されたら、経過時間を補償してタイマーを再開
-        if (isRunning) {
-            // AudioContextが中断状態の場合、再開を試みる
-            if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume().then(() => {
-                    console.log('AudioContext resumed successfully on visibilitychange.');
-                }).catch(e => {
-                    console.error('Failed to resume AudioContext on visibilitychange:', e);
-                });
-            }
-
-            const now = Date.now();
-            const hiddenDuration = (now - startTime) / 1000; // 非表示になっていた時間（秒）
-            const oldTotalSeconds = remainingTimeAtPause; // 非表示になる前の残り時間
-            totalSeconds = remainingTimeAtPause - hiddenDuration; // 残り時間を補償
+    if (isRunning) {
+        const now = Date.now();
+        const hiddenDuration = (now - startTime) / 1000; // 非表示になっていた時間（秒）
+        
+        // 非表示中に経過した時間を考慮してtotalSecondsを更新
+        totalSeconds = remainingTimeAtPause - hiddenDuration;
 
             // 非表示になっていた間に鳴るべきだったベルをチェックし、鳴らす
-            // initialTotalSecondsはタイマー開始時の総時間なので、経過時間は initialTotalSeconds - totalSeconds
-            const oldElapsedTime = initialTotalSeconds - oldTotalSeconds;
-            const newElapsedTime = initialTotalSeconds - totalSeconds;
-
+            // ここでは、ベルが鳴るべきだった時間を過ぎていれば鳴らすようにする
             bellTimes.forEach(bellSetting => {
-                const bellTriggerTime = bellSetting.time * 60; // ベルが鳴るべき経過時間（秒単位）
+                const bellTriggerTime = bellSetting.time; // 秒単位
 
-                // 非表示になっていた間にベルが鳴るべき時刻が過ぎていた場合
-                if (oldElapsedTime < bellTriggerTime && newElapsedTime >= bellTriggerTime && !rungBellTimes.includes(bellTriggerTime)) {
-                    const message = `${bellSetting.time}分経過しました。`; // メッセージを生成
-                    playBellMultipleTimes(bellSetting.count, message); // message引数を渡す
-                    rungBellTimes.push(bellTriggerTime); // 鳴らした経過時間を記録
+                // 非表示になる前の残り時間 (remainingTimeAtPause) から、非表示になっていた間にベルが鳴るべきだったかチェック
+                // totalSeconds (現在の残り時間) が bellTriggerTime を下回っていて、かつまだ鳴らされていない場合
+                if (!isOvertime && remainingTimeAtPause >= bellTriggerTime && totalSeconds < bellTriggerTime && !bellSetting.rung) {
+                    const message = `${Math.floor(bellSetting.time / 60)}分${bellSetting.time % 60}秒経過しました。`;
+                    playBellMultipleTimes(bellSetting.count, message);
+                    bellSetting.rung = true; // 鳴らした経過時間を記録
+                    rungBellCounts++; // 鳴らしたベルの回数をインクリメント
                 }
             });
 
             // タイマーが0以下になっていた場合
-            if (totalSeconds <= 0) {
+            if (!isOvertime && totalSeconds <= 0) {
                 totalSeconds = 0;
-                updateDisplay();
-                if (!finalBellsRung) {
-                    playFinalBells(); // playFinalBellsは既にmessage引数を持つplayBellMultipleTimesを呼び出している
-                    messageContainer.textContent = '時間です！';
-                    finalBellsRung = true;
+                if (rungBellCounts < 3) {
+                    playBellMultipleTimes(3, '時間です！');
+                    rungBellCounts = 3;
                 }
-                stopTimer();
-                return;
+                isOvertime = true;
             }
 
             // タイマーを再開
@@ -342,18 +393,21 @@ document.addEventListener('visibilitychange', () => {
             timer = setInterval(() => {
                 const currentNow = Date.now();
                 const elapsedSinceStart = (currentNow - startTime) / 1000;
-                totalSeconds = initialTotalSeconds - elapsedSinceStart;
 
-                if (totalSeconds <= 0) {
-                    totalSeconds = 0;
-                    updateDisplay();
-                    if (!finalBellsRung) {
-                        playFinalBells();
-                        messageContainer.textContent = '時間です！';
-                        finalBellsRung = true;
+                if (!isOvertime) {
+                    totalSeconds = initialTotalSeconds - elapsedSinceStart;
+                    if (totalSeconds <= 0) {
+                        totalSeconds = 0;
+                        if (rungBellCounts < 3) {
+                            playBellMultipleTimes(3, '時間です！');
+                            rungBellCounts = 3;
+                        }
+                        isOvertime = true;
+                        initialTotalSeconds = 0;
+                        startTime = Date.now();
                     }
-                    stopTimer();
-                    return;
+                } else {
+                    totalSeconds = initialTotalSeconds - elapsedSinceStart; // カウントアップ中は負の値からさらに減らす
                 }
 
                 updateDisplay();
