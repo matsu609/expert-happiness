@@ -40,15 +40,32 @@ const enableNoSleepBtn = document.getElementById('enable-nosleep');
 let audioContext;
 let audioBuffer;
 
-// Web Workerの初期化
-const timerWorker = new Worker('timer-worker.js');
+// Web Workerの代わりにメインスレッドでタイマーを管理する変数
+let timerInterval; // setIntervalのIDを保持
+let initialTotalSecondsForTimer = 0; // タイマー開始時の秒数 (Web WorkerのinitialTotalSecondsに相当)
+let startTime = 0; // タイマー開始時刻 (Web WorkerのstartTimeに相当)
 
-timerWorker.onmessage = function(e) {
-    totalSeconds = e.data.totalSeconds;
-    isOvertime = totalSeconds < 0;
+// Web Workerのonmessageロジックを直接実行する関数
+function runTimerLogic() {
+    const now = Date.now();
+    const elapsedSinceStart = (now - startTime) / 1000;
+
+    if (!isOvertime) {
+        totalSeconds = initialTotalSecondsForTimer - elapsedSinceStart;
+        if (totalSeconds <= 0) {
+            totalSeconds = 0;
+            isOvertime = true;
+            initialTotalSecondsForTimer = 0; // オーバータイム開始時の基準をリセット
+            startTime = Date.now(); // オーバータイム開始時刻を更新
+        }
+    } else {
+        totalSeconds = -elapsedSinceStart;
+    }
+    
     updateDisplay();
     checkBellTimes();
-};
+}
+
 
 function requestNotificationPermission() {
     if (!("Notification" in window)) {
@@ -100,28 +117,48 @@ function updateDisplay() {
 function startTimer() {
     if (isRunning) return;
     isRunning = true;
-    initialTotalSecondsForBellCheck = totalSeconds;
-    timerWorker.postMessage({ command: 'start', value: totalSeconds });
+    initialTotalSecondsForBellCheck = totalSeconds; // ベルチェック用の初期秒数を設定
+
+    // Web Workerの'start'コマンドのロジックを直接実行
+    initialTotalSecondsForTimer = totalSeconds;
+    startTime = Date.now();
+    isOvertime = false;
+
+    if (timerInterval) clearInterval(timerInterval);
+
+    timerInterval = setInterval(runTimerLogic, 10); // 10ミリ秒ごとに更新
+
     noSleep.enable(); // タイマー開始時にスリープ防止を有効化
+    toggleTimerBtn.textContent = 'ストップ'; // ボタンテキストを更新
 }
 
 function stopTimer() {
     if (!isRunning) return;
     isRunning = false;
-    timerWorker.postMessage({ command: 'stop' });
+    // Web Workerの'stop'コマンドのロジックを直接実行
+    clearInterval(timerInterval);
+    timerInterval = null;
+
     noSleep.disable(); // タイマー停止時にスリープ防止を無効化
+    toggleTimerBtn.textContent = 'スタート'; // ボタンテキストを更新
 }
 
 function resetTimer() {
     stopTimer(); // releaseWakeLockもここで呼ばれる
-    saveBellSettings();
-    timerWorker.postMessage({ command: 'reset', value: totalSeconds });
+    saveBellSettings(); // 設定を保存し、totalSecondsを更新
+
+    // Web Workerの'reset'コマンドのロジックを直接実行
+    clearInterval(timerInterval);
+    timerInterval = null;
+    // totalSecondsはsaveBellSettingsで設定される
+    isOvertime = false;
+    
     messageContainer.textContent = '';
     rungBellCounts = 0;
-    isOvertime = false;
     bellTimes.forEach(bell => bell.rung = false);
     timeDisplay.className = 'time-display';
     updateDisplay();
+    toggleTimerBtn.textContent = 'スタート'; // ボタンテキストを更新
 }
 
 function playSoundWithAudioContext(count) {
@@ -185,9 +222,9 @@ function saveBellSettings() {
     const bell3Time = getSeconds(bell3HoursInput, bell3MinutesInput, bell3SecondsInput);
     if (bell3Time > 0) {
         bellTimes.push({ time: bell3Time, count: 3, rung: false });
-        totalSeconds = bell3Time;
+        totalSeconds = bell3Time; // 最も遅いベルの時間を初期タイマー時間とする
     } else {
-        totalSeconds = 0;
+        totalSeconds = 0; // ベルが設定されていない場合は0秒
     }
     
     bellTimes.sort((a, b) => a.time - b.time);
@@ -260,16 +297,13 @@ toggleTimerBtn.addEventListener('click', () => {
     initAudioContext(); // 最初のクリックでAudioContextを初期化
     if (isRunning) {
         stopTimer();
-        toggleTimerBtn.textContent = 'スタート';
     } else {
         startTimer();
-        toggleTimerBtn.textContent = 'ストップ';
     }
 });
 
 resetBtn.addEventListener('click', () => {
     resetTimer();
-    toggleTimerBtn.textContent = 'スタート';
 });
 
 enableNoSleepBtn.addEventListener('click', () => {
